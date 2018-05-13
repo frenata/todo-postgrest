@@ -1,4 +1,4 @@
-module Example exposing (..)
+module Todo exposing (..)
 
 import Html exposing (Html, div, form, input, table, td, text, tr)
 import Html.Attributes exposing (autofocus, class, id, placeholder, value)

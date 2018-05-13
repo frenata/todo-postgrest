@@ -8,11 +8,16 @@
     ],
     "exposed-modules": [],
     "dependencies": {
-        "ccapndave/elm-update-extra": "3.0.0 <= v < 4.0.0",
         "elm-lang/core": "5.1.1 <= v < 6.0.0",
         "elm-lang/html": "2.0.0 <= v < 3.0.0",
         "elm-lang/http": "1.0.0 <= v < 2.0.0",
         "john-kelly/elm-postgrest": "4.0.0 <= v < 5.0.0"
+    },
+    "dependency-sources": {
+        "john-kelly/elm-postgrest": {
+            "url": "git@github.com:john-kelly/elm-postgrest.git",
+            "ref": "dev"
+        }
     },
     "elm-version": "0.18.0 <= v < 0.19.0"
 }
