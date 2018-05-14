@@ -1,16 +1,10 @@
 module Todo exposing (..)
 
-import Html exposing (Html, div, form, input, table, td, text, tr)
-import Html.Attributes exposing (autofocus, class, id, placeholder, value)
+import Html exposing (Html, del, div, fieldset, form, input, label, table, td, text, tr)
+import Html.Attributes exposing (autofocus, checked, class, id, name, placeholder, type_, value)
 import Html.Events exposing (onClick, onInput, onSubmit)
 import Http
-import PostgRest as PG
-    exposing
-        ( Attribute
-        , Request
-        , Schema
-        , Selection
-        )
+import PostgRest as PG exposing (Attribute, Request, Schema, Selection)
 import Task
 import Time
 
@@ -19,10 +13,17 @@ import Time
 
 
 type alias Model =
-    { todos : List Todo
-    , error : Maybe Http.Error
-    , task : String
+    { todos : List Todo -- current todos fetched from db
+    , error : Maybe Http.Error -- last recorded error, for debugging
+    , task : String -- the to-be-added task
+    , shown : Shown -- tracks which todos to display
     }
+
+
+type Shown
+    = All
+    | Completed
+    | Uncompleted
 
 
 type alias Todo =
@@ -42,11 +43,8 @@ main =
 
 
 init =
-    ( Model [] Nothing ""
-    , Http.send GetTodos <|
-        PG.toHttpRequest
-            server
-            getTodos
+    ( Model [] Nothing "" Uncompleted
+    , fetchTodos
     )
 
 
@@ -57,12 +55,12 @@ init =
 {-| Enumeration of possible messages.
 -}
 type Msg
-    = GetTodos (Result Http.Error (List Todo))
-    | PatchTodo (Result Http.Error Todo)
+    = GetTodos (Result Http.Error (List Todo)) -- read from the db
+    | PatchTodo (Result Http.Error Todo) -- modify the db
     | Toggle Todo
     | NewTask String
     | SendTask
-    | NoOp
+    | Show Shown
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -70,9 +68,6 @@ update msg model =
     case msg of
         NewTask t ->
             ( { model | task = t }, Cmd.none )
-
-        NoOp ->
-            ( model, Cmd.none )
 
         SendTask ->
             ( { model | task = "" }
@@ -91,10 +86,7 @@ update msg model =
 
         PatchTodo (Ok newTodos) ->
             ( model
-            , Http.send GetTodos <|
-                PG.toHttpRequest
-                    server
-                    getTodos
+            , fetchTodos
             )
 
         Toggle todo ->
@@ -102,6 +94,9 @@ update msg model =
             , Http.send PatchTodo <|
                 PG.toHttpRequest server (toggleTodo todo)
             )
+
+        Show s ->
+            ( { model | shown = s }, Cmd.none )
 
 
 
@@ -111,28 +106,66 @@ update msg model =
 view : Model -> Html Msg
 view model =
     div []
-        [ viewTodos model.todos
+        [ toggleView
+        , viewTodos model.todos model.shown
         , addTodo model.task
+        ]
+
+
+{-| Toggle what tasks are shown: all / completed / uncompleted.
+-}
+toggleView : Html Msg
+toggleView =
+    let
+        radio shown str def =
+            label []
+                [ input [ checked def, name "shown", type_ "radio", onClick (Show shown) ] []
+                , text str
+                ]
+    in
+    div []
+        [ fieldset []
+            [ radio All "All" False
+            , radio Completed "Completed" False
+            , radio Uncompleted "Uncompleted" True
+            ]
         ]
 
 
 {-| Render the existing todos into a table, click to toggle whether they are done.
 -}
-viewTodos : List Todo -> Html Msg
-viewTodos todos =
-    table [ id "todos" ] <|
-        List.map
-            (\x ->
-                tr
-                    [ class "todo"
-                    , onClick (Toggle x)
+viewTodos : List Todo -> Shown -> Html Msg
+viewTodos todos shown =
+    let
+        shouldDisplay x =
+            case shown of
+                All ->
+                    True
+
+                Completed ->
+                    x.done
+
+                Uncompleted ->
+                    not x.done
+
+        display x =
+            tr
+                [ class "todo"
+                , onClick (Toggle x)
+                ]
+                [ td [ class "task" ]
+                    [ if not x.done then
+                        text x.task
+                      else
+                        del [] [ text x.task ]
                     ]
-                    [ td [ class "id" ] [ text <| toString x.id ]
-                    , td [ class "task" ] [ text x.task ]
-                    , td [ class "done" ] [ text <| toString x.done ]
-                    ]
-            )
-            (List.sortBy .id todos)
+                ]
+    in
+    todos
+        |> List.sortBy .id
+        |> List.filter shouldDisplay
+        |> List.map display
+        |> table [ id "todos" ]
 
 
 {-| Form to add a todo.
@@ -158,6 +191,9 @@ subscriptions model =
 -- DATABASE
 
 
+{-| Interestingly this schema is allowed to be a subset of the DB schema.
+I'm not sure how to represent all PG datatypes within this library.
+-}
 todoSchema :
     Schema x
         { id : Attribute Int
@@ -172,6 +208,8 @@ todoSchema =
         }
 
 
+{-| A selection of data to return from the database.
+-}
 todoSelection :
     Selection
         { attributes
@@ -194,6 +232,8 @@ server =
     }
 
 
+{-| Create a new todo by specifying a task and accepting other defaults.
+-}
 newTodo : String -> Request Todo
 newTodo task =
     PG.createOne todoSchema
@@ -202,6 +242,8 @@ newTodo task =
         }
 
 
+{-| Flip the 'done' status of tasks that match the id.
+-}
 toggleTodo : Todo -> Request Todo
 toggleTodo todo =
     PG.updateOne todoSchema
@@ -211,6 +253,10 @@ toggleTodo todo =
         }
 
 
-getTodos : Request (List Todo)
-getTodos =
-    PG.readAll todoSchema todoSelection
+{-| Grab everything in the database and (on success) update the model.
+-}
+fetchTodos =
+    Http.send GetTodos <|
+        PG.toHttpRequest
+            server
+            (PG.readAll todoSchema todoSelection)
